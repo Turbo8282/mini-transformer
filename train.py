@@ -58,5 +58,8 @@ def main():
         loss = train(model, train_loader, optimizer, criterion)
         print(f"Epoch {epoch+1}: Loss = {loss:.4f}")
 
+    torch.save(model.state_dict(), "mini_transformer.pt")
+    print("✅ Model saved as mini_transformer.pt")
+
 if __name__ == "__main__":
     main()
