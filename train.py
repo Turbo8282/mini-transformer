@@ -3,6 +3,9 @@ import torch.nn as nn
 import torch.optim as optim
 from model import Transformer
 from data import get_dataloaders, SRC_PAD_IDX, TGT_PAD_IDX
+from data import src_vocab, tgt_vocab
+import pickle
+
 from utils import create_mask
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -28,9 +31,21 @@ def train(model, dataloader, optimizer, criterion):
         tgt_output = tgt_output.reshape(-1)
         loss = criterion(logits, tgt_output)
 
+        if torch.isnan(loss):
+            print("💥 NaN loss detected")
+            print("logits shape:", logits.shape)
+            print("tgt_output shape:", tgt_output.shape)
+            print("logits:", logits)
+            print("tgt_output:", tgt_output)
+            print("logits vocab size:", logits.size(-1))
+            print("max tgt_output:", tgt_output.max().item())
+            print("min tgt_output:", tgt_output.min().item())
+            exit()
+
         # Backward + optimization
         optimizer.zero_grad()
         loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
 
         total_loss += loss.item()
@@ -39,17 +54,25 @@ def train(model, dataloader, optimizer, criterion):
 
 def main():
     # Hyperparameters
-    SRC_VOCAB_SIZE = 100
-    TGT_VOCAB_SIZE = 100
-    EMBED_DIM = 128
-    NUM_HEADS = 4
-    FF_DIM = 512
-    NUM_LAYERS = 2
+    SRC_VOCAB_SIZE = len(src_vocab)
+    TGT_VOCAB_SIZE = len(tgt_vocab)
+    EMBED_DIM = 256
+    NUM_HEADS = 8
+    FF_DIM = 1024
+    NUM_LAYERS = 4
     BATCH_SIZE = 32
-    EPOCHS = 10
-    LR = 1e-3
+    EPOCHS = 30
+    LR = 5e-4
 
-    model = Transformer(SRC_VOCAB_SIZE, TGT_VOCAB_SIZE, EMBED_DIM, NUM_HEADS, FF_DIM, NUM_LAYERS).to(DEVICE)
+    model = Transformer(
+        src_vocab_size=SRC_VOCAB_SIZE,
+        tgt_vocab_size=TGT_VOCAB_SIZE,
+        embed_dim=EMBED_DIM,
+        num_heads=NUM_HEADS,
+        ff_dim=FF_DIM,
+        num_layers=NUM_LAYERS
+    )
+
     optimizer = optim.Adam(model.parameters(), lr=LR)
     criterion = nn.CrossEntropyLoss(ignore_index=TGT_PAD_IDX)
     train_loader = get_dataloaders(batch_size=BATCH_SIZE)
@@ -59,7 +82,11 @@ def main():
         print(f"Epoch {epoch+1}: Loss = {loss:.4f}")
 
     torch.save(model.state_dict(), "mini_transformer.pt")
-    print("✅ Model saved as mini_transformer.pt")
+    with open("src_vocab.pkl", "wb") as f:
+        pickle.dump(src_vocab, f)
+    with open("tgt_vocab.pkl", "wb") as f:
+        pickle.dump(tgt_vocab, f)
+    print("✅ Model and vocab saved. You can now run inference!")
 
 if __name__ == "__main__":
     main()

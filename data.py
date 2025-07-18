@@ -1,19 +1,25 @@
+import csv
 import torch
 from torch.utils.data import DataLoader, Dataset
+import re
 
-# Dummy English → French sentence pairs
-data_pairs = [
-    ("I love cats", "J’aime les chats"),
-    ("You are smart", "Tu es intelligent"),
-    ("We play games", "Nous jouons à des jeux"),
-    ("They eat rice", "Ils mangent du riz"),
-    ("He drinks water", "Il boit de l’eau")
-]
+# Load from CSV
+def load_data(path="dataset.csv", max_samples=10000):
+    pairs = []
+    with open(path, newline='', encoding='utf-8') as f:
+        reader = csv.DictReader(f)
+        for i, row in enumerate(reader):
+            if i >= max_samples:
+                break
+            pairs.append((row["en"], row["fr"]))
+    return pairs
 
-# Basic word-level tokenizer
+data_pairs = load_data()  # load up to 10k sentence pairs
+
+
 def build_vocab(sentences):
-    vocab = {"<pad>": 0, "<sos>": 1, "<eos>": 2}
-    idx = 3
+    vocab = {"<pad>": 0, "<sos>": 1, "<eos>": 2, "<unk>": 3}
+    idx = 4
     for sent in sentences:
         for word in sent.lower().split():
             if word not in vocab:
@@ -21,16 +27,21 @@ def build_vocab(sentences):
                 idx += 1
     return vocab
 
+
 src_vocab = build_vocab([src for src, _ in data_pairs])
 tgt_vocab = build_vocab([tgt for _, tgt in data_pairs])
 
 SRC_PAD_IDX = src_vocab["<pad>"]
 TGT_PAD_IDX = tgt_vocab["<pad>"]
 
+
 def encode(sentence, vocab):
-    tokens = sentence.lower().split()
-    ids = [vocab.get(token, 0) for token in tokens]
+    # Remove punctuation, lowercase, split
+    tokens = re.findall(r"\w+|[^\w\s]", sentence.lower())
+    ids = [vocab.get(token, vocab["<unk>"]) for token in tokens]
     return [vocab["<sos>"]] + ids + [vocab["<eos>"]]
+
+
 
 class TranslationDataset(Dataset):
     def __init__(self, pairs):

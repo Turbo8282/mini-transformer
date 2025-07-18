@@ -4,22 +4,25 @@ import torch.nn.functional as F
 import math
 
 class ScaledDotProductAttention(nn.Module):
-    # Initialise
     def __init__(self):
         super().__init__()
-    
+
     def forward(self, Q, K, V, mask=None):
         d_k = Q.size(-1)
 
-        scores = torch.matmul(Q, K.transpose(-2, -1)) / torch.sqrt(torch.tensor(d_k, dtype=torch.float32))
+        scores = torch.matmul(Q, K.transpose(-2, -1)) / math.sqrt(d_k)
 
         if mask is not None:
+            # Ensure mask is boolean and broadcastable
+            if mask.dtype != torch.bool:
+                mask = mask == 0  # or mask = mask.to(torch.bool)
             scores = scores.masked_fill(mask == 0, float('-inf'))
 
+        scores = torch.clamp(scores, min=-1e9, max=1e9)
         attention_weights = F.softmax(scores, dim=-1)
         output = torch.matmul(attention_weights, V)
         return output, attention_weights
-    
+
 
 class MultiHeadAttention(nn.Module):
     def __init__(self, embed_dim, num_heads):
@@ -40,27 +43,29 @@ class MultiHeadAttention(nn.Module):
 
         self.attention = ScaledDotProductAttention()
 
-    def forward(self, x, mask=None):
-        batch_size, seq_len, embed_dim = x.size()
+    def forward(self, Q, K=None, V=None, mask=None):
+        if K is None: K = Q
+        if V is None: V = Q
 
-        # Linear projection
-        Q = self.q_linear(x)
-        K = self.k_linear(x)
-        V = self.v_linear(x)
+        batch_size, seq_len, embed_dim = Q.size()
 
-        # Reshape for multi-heads: (batch, heads, seq_len, head_dim)
-        Q = Q.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
-        K = K.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
-        V = V.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
+        # Linear projections
+        Q = self.q_linear(Q)
+        K = self.k_linear(K)
+        V = self.v_linear(V)
 
-        # Apply attention to each head
-        attn_output, attn_weights = self.attention(Q, K, V, mask)
+        # Reshape for multi-heads
+        Q = Q.view(batch_size, -1, self.num_heads, self.head_dim).transpose(1, 2)
+        K = K.view(batch_size, -1, self.num_heads, self.head_dim).transpose(1, 2)
+        V = V.view(batch_size, -1, self.num_heads, self.head_dim).transpose(1, 2)
 
-        # Concatenate heads back: (batch, seq_len, embed_dim)
-        out = attn_output.transpose(1, 2).contiguous().view(batch_size, seq_len, embed_dim)
+        # Apply attention
+        attn_output, _ = self.attention(Q, K, V, mask)
 
-        # Final projection
+        # Concatenate and project
+        out = attn_output.transpose(1, 2).contiguous().view(batch_size, seq_len, self.embed_dim)
         return self.out_proj(out)
+       
 
 
 class FeedForward(nn.Module):
@@ -112,7 +117,7 @@ class EncoderLayer(nn.Module):
 
     def forward(self, x, mask=None):
         # Self-attention with residual + normalization
-        attn_output = self.attention(x, mask)
+        attn_output = self.attention(x, mask=mask)
         x = self.norm1(x + self.dropout1(attn_output))
 
         # Feed-forward with residual + normalization
@@ -125,7 +130,8 @@ class EncoderLayer(nn.Module):
 class Encoder(nn.Module):
     def __init__(self, vocab_size, embed_dim, num_heads, ff_dim, num_layers, max_len=512, dropout=0.1):
         super().__init__()
-        self.token_embedding = nn.Embedding(vocab_size, embed_dim)
+        self.token_embedding = nn.Embedding(vocab_size, embed_dim, padding_idx=0)  # optional: pass in pad_idx
+        self.embed_scale = math.sqrt(embed_dim)
         self.positional_encoding = PositionalEncoding(embed_dim, max_len)
 
         self.layers = nn.ModuleList([
@@ -136,7 +142,7 @@ class Encoder(nn.Module):
 
     def forward(self, x, mask=None):
         # Token + position embeddings
-        x = self.token_embedding(x)
+        x = self.token_embedding(x) * self.embed_scale
         x = self.positional_encoding(x)
         x = self.dropout(x)
 

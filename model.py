@@ -11,12 +11,18 @@ class Transformer(nn.Module):
 
         self.output_projection = nn.Linear(embed_dim, tgt_vocab_size)
 
-    def forward(self, src, tgt, src_mask=None, tgt_mask=None):
-        # src: [batch_size, src_seq_len]
-        # tgt: [batch_size, tgt_seq_len]
+        self.init_weights()  # ⬅️ Add this line to apply initialization
+        self.norm = nn.LayerNorm(embed_dim)
+        self.output_projection = nn.Linear(embed_dim, tgt_vocab_size)
 
+
+    def init_weights(self):
+        for name, param in self.named_parameters():
+            if param.dim() > 1:
+                nn.init.xavier_uniform_(param)
+
+    def forward(self, src, tgt, src_mask=None, tgt_mask=None):
         enc_output = self.encoder(src, mask=src_mask)             # (B, src_len, D)
         dec_output = self.decoder(tgt, enc_output, tgt_mask, src_mask)  # (B, tgt_len, D)
-
-        logits = self.output_projection(dec_output)  # (B, tgt_len, vocab_size)
+        logits = self.output_projection(self.norm(dec_output))
         return logits
